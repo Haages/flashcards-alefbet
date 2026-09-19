@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
-<link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#0e7490">
 <title>Flashcards Alef</title>
 <style>
@@ -85,7 +84,7 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
   <h1 data-i18n="title">Flashcards Alef</h1>
   <div class="sub" data-i18n="sub">Slim leren met spaced repetition — 100% offline</div>
 </header>
-<div style="background:#dcfce7;color:#166534;padding:6px 14px;font-size:12px;text-align:center">🔊 Audio via ingebouwde Hebreeuwse stem (Web Speech). Werkt in elke browser.</div>
+<div style="background:#dcfce7;color:#166534;padding:6px 14px;font-size:12px;text-align:center">🔊 Audio via Web Speech · 🐛 Meld fouten via de knop op elke kaart</div>
 <nav>
   <a href="index.html" data-i18n="nav-home">🏠 Dashboard</a>
   <a class="active" onclick="showTab('study')" data-i18n="nav-study">🎓 Vandaag</a>
@@ -95,6 +94,7 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
   <a onclick="showTab('add')" data-i18n="nav-add">➕ Kaart</a>
   <a onclick="showTab('mastered')" data-i18n="nav-mastered">⭐ Beheerst</a>
   <a onclick="showTab('backup')" data-i18n="nav-backup">💾 Backup</a>
+  <a onclick="showTab('feedback')" data-i18n="nav-feedback">📝 Opmerkingen</a>
 </nav>
 <main>
 
@@ -140,6 +140,7 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
       <button onclick="undoRate()" data-i18n="undo">↺ Ongedaan</button>
       <button onclick="skipCard()" data-i18n="skip">↷ Overslaan</button>
       <button onclick="playAudio()" data-i18n="audio">🔊 Audio</button>
+      <button onclick="reportCard()" style="background:#fef3c7;color:#92400e" data-i18n="report">🐛 Fout/opmerking</button>
     </div>
   </div>
 </div>
@@ -251,6 +252,18 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
     <h2 data-i18n="mastered-h">⭐ Beheerste kaarten</h2>
     <p style="font-size:13px;color:#666;margin-bottom:14px" data-i18n="mastered-p">Uit rotatie. Klik "Terug" om weer te oefenen.</p>
     <div id="masteredList"></div>
+  </div>
+</div>
+
+<div class="tab" id="tab-feedback">
+  <div class="dash">
+    <h2 data-i18n="feedback-h">📝 Opmerkingen & fouten</h2>
+    <p style="font-size:13px;color:#666;margin-bottom:14px" data-i18n="feedback-p">Jouw meldingen over foutieve vertalingen, fonetiek, of andere opmerkingen. Exporteer als tekstbestand — stuur naar mij en ik verwerk ze in een update.</p>
+    <div id="feedbackList" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="big-btn" onclick="exportFeedback()" data-i18n="fb-export">📤 Exporteer opmerkingen (.txt)</button>
+      <button class="big-btn" style="background:#888" onclick="clearFeedback()" data-i18n="fb-clear">🗑 Alles wissen</button>
+    </div>
   </div>
 </div>
 
@@ -527,11 +540,11 @@ function setLang(l){const d=I18N[l];document.querySelectorAll('[data-i18n]').for
 
 // ==== State ====
 const STORE='fca_v2';
-const DEFAULT={progress:{},mastered:{},custom:[],mixes:[],hidden:{},themeExtras:{},history:{},settings:{dir:'he-en',newPerDay:10,tense:'all',weeks:999,nikud:true,phon:true,sent:true,audio:false,verbForms:true,curDeck:null}};
+const DEFAULT={progress:{},mastered:{},custom:[],mixes:[],hidden:{},themeExtras:{},history:{},feedback:[],settings:{dir:'he-en',newPerDay:10,tense:'all',weeks:999,nikud:true,phon:true,sent:true,audio:false,verbForms:true,curDeck:null}};
 let STATE=load();let SESSION={queue:[],idx:0,mode:'study',lastCard:null,lastRating:null,done:0};
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));return {...DEFAULT,...s,settings:{...DEFAULT.settings,...(s?.settings||{})}}}catch(e){return {...DEFAULT}}}
 function save(){localStorage.setItem(STORE,JSON.stringify(STATE))}
-function today(){return new Date().toISOString().slice(0,10)}
+function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x.toISOString().slice(0,10)}
 
 // ==== SM-2 ====
@@ -608,11 +621,65 @@ function cardKey(it){return `${STATE.settings.curDeck||'?'}:${it.w||it.he}:${STA
 
 function pickQueue(){
   const deck = findDeck(STATE.settings.curDeck);
-  const pool = deck ? getDeckItems(deck).filter(it=>!STATE.mastered[cardKey(it)]) : [];
-  const t=today();const newC=[],rev=[];
-  for(const it of pool){const k=cardKey(it),s=STATE.progress[k];if(!s){newC.push(it)}else if(s.due<=t){rev.push(it)}}
-  newC.sort(()=>Math.random()-0.5);rev.sort(()=>Math.random()-0.5);
-  return {queue:[...rev,...newC.slice(0,STATE.settings.newPerDay)],newCount:Math.min(newC.length,STATE.settings.newPerDay),reviewCount:rev.length};
+  if(!deck) return {queue:[],newCount:0,reviewCount:0};
+  const t = today();
+  // Hoeveel NIEUW mag ik vandaag nog leren?
+  const todayNewCount = countTodayNew();
+  const remainingToday = Math.max(0, STATE.settings.newPerDay - todayNewCount);
+  // Deze deck: reviews (altijd volledig) + nieuwe (tot remainingToday)
+  const pool = getDeckItems(deck).filter(it=>!STATE.mastered[cardKey(it)]);
+  const newC = [], rev = [];
+  for(const it of pool){
+    const k = cardKey(it), s = STATE.progress[k];
+    if(!s) newC.push(it);
+    else if(s.due <= t) rev.push(it);
+  }
+  newC.sort(()=>Math.random()-0.5);
+  rev.sort(()=>Math.random()-0.5);
+  let newSelected = newC.slice(0, remainingToday);
+  let stillNeed = remainingToday - newSelected.length;
+  // Als huidig deck te weinig heeft: aanvullen uit andere decks
+  if(stillNeed > 0){
+    const all = getAllDecks();
+    const otherDecks = [...all.main, ...all.verb, ...all.theme, ...(all.mix||[])]
+      .filter(d => d.id !== STATE.settings.curDeck);
+    const seenKeys = new Set(newSelected.map(it => cardKey(it)));
+    for(const other of otherDecks){
+      if(stillNeed <= 0) break;
+      const otherPool = getRawDeckItems(other).filter(it =>
+        !STATE.mastered[cardKey({...it, cat: other.source})] &&
+        !STATE.progress[cardKey({...it, cat: other.source})]
+      );
+      for(const it of otherPool){
+        if(stillNeed <= 0) break;
+        const marked = {...it, _fromDeck: other.id};
+        const k = cardKey(marked);
+        if(seenKeys.has(k)) continue;
+        seenKeys.add(k);
+        newSelected.push(marked);
+        stillNeed--;
+      }
+    }
+  }
+  return {
+    queue: [...rev, ...newSelected],
+    newCount: newSelected.length,
+    reviewCount: rev.length,
+    remainingToday: remainingToday
+  };
+}
+function countTodayNew(){
+  // Aantal NIEUWE kaarten geleerd vandaag (uit STATE.progress met last=today en reps=1)
+  const t = today();
+  let c = 0;
+  for(const k in STATE.progress){
+    const s = STATE.progress[k];
+    if(s.last === t && s.reps === 1 && !s.wrong) c++;  // eerste keer + goed = nieuw geleerd vandaag
+  }
+  // Alternatief: gebruik history.done als eerste-keer-schatting
+  const h = STATE.history[t];
+  if(h && h.new !== undefined) return h.new;
+  return c;
 }
 
 // ==== Dashboard ====
@@ -630,7 +697,9 @@ function updateDashboard(){
     sb.style.cssText = 'text-align:center;margin-bottom:10px;font-size:13px';
     document.querySelector('#tab-study .dash').insertBefore(sb, document.querySelector('#tab-study .dash').firstChild.nextSibling);
   }
-  sb.innerHTML = `🔥 <b>${streak}</b> dag${streak===1?'':'en'} streak · Vandaag geoefend: <b>${th.done}</b>`;
+  const newDoneToday = countTodayNew();
+  const remaining = Math.max(0, STATE.settings.newPerDay - newDoneToday);
+  sb.innerHTML = `🔥 <b>${streak}</b> dag${streak===1?'':'en'} streak · Vandaag geoefend: <b>${th.done}</b> (${newDoneToday}/${STATE.settings.newPerDay} nieuw · ${remaining} te gaan)`;
   if(!deck){document.getElementById('sNew').textContent='-';document.getElementById('sReview').textContent='-';document.getElementById('sDone').textContent='-';document.getElementById('sMastered').textContent=Object.keys(STATE.mastered).length;return}
   const {queue,newCount,reviewCount} = pickQueue();
   document.getElementById('sNew').textContent=newCount;
@@ -906,11 +975,15 @@ function rate(r){
   // Registreer in history
   if(SESSION.mode==='study'){
     const t = today();
-    if(!STATE.history[t]) STATE.history[t] = {done:0, right:0, wrong:0, mastered:0, decks:[]};
+    if(!STATE.history[t]) STATE.history[t] = {done:0, right:0, wrong:0, mastered:0, new:0, decks:[]};
     STATE.history[t].done++;
     if(r==='mastered') STATE.history[t].mastered++;
     else if(r==='yes') STATE.history[t].right++;
     else if(r==='no') STATE.history[t].wrong++;
+    // Was dit een nieuwe kaart? (geen vorige progress)
+    if(Object.keys(SESSION.lastCard.prev).length === 0 && r !== 'mastered'){
+      STATE.history[t].new = (STATE.history[t].new||0) + 1;
+    }
     if(!STATE.history[t].decks.includes(STATE.settings.curDeck)) STATE.history[t].decks.push(STATE.settings.curDeck);
     save();
   }
@@ -1187,8 +1260,84 @@ function unmaster(k){delete STATE.mastered[k];save();renderMastered();updateDash
 function exportBackup(){const b=new Blob([JSON.stringify(STATE,null,2)],{type:'application/json'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=`flashcards_alef_backup_${today()}.json`;a.click();URL.revokeObjectURL(u)}
 function restoreBackup(evt){const f=evt.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const s=JSON.parse(e.target.result);if(!s.progress)throw new Error('Ongeldig');if(!confirm('OVERSCHRIJVEN?'))return;STATE={...DEFAULT,...s,settings:{...DEFAULT.settings,...(s.settings||{})}};save();alert('Terug');location.reload()}catch(err){alert('Fout: '+err.message)}};r.readAsText(f)}
 
+// ==== Feedback ====
+function reportCard(){
+  const it = SESSION.queue[SESSION.idx]; if(!it) return;
+  const w = it.wn || it.he || it.w || it.inf || '';
+  const en = it.en || '';
+  const type = prompt('Wat is de opmerking?\n1 = Verkeerde vertaling\n2 = Fonetiek klopt niet\n3 = Voorbeeldzin klopt niet\n4 = Nikud fout\n5 = Anders\n\nType nummer of eigen tekst:', '');
+  if(type === null) return;
+  const kind = {'1':'Vertaling','2':'Fonetiek','3':'Zin','4':'Nikud','5':'Anders'}[type] || 'Overig';
+  const note = type in {'1':1,'2':1,'3':1,'4':1,'5':1} ? prompt(`Opmerking bij ${w}: (wat moet het zijn?)`,''):type;
+  if(note === null) return;
+  STATE.feedback.push({
+    w, en, ph: it.ph||'', form: it.form||'', cat: it.cat||STATE.settings.curDeck,
+    kind, note: note||'(geen tekst)',
+    date: new Date().toISOString(),
+    deck: STATE.settings.curDeck
+  });
+  STATE.feedback = STATE.feedback.slice(-500); // max 500
+  save();
+  // Visuele bevestiging
+  const meta = document.getElementById('cardMeta');
+  const badge = document.createElement('span');
+  badge.className='pill'; badge.style.background='#fef3c7'; badge.style.color='#92400e';
+  badge.textContent='✓ Opmerking opgeslagen';
+  meta.appendChild(badge);
+  setTimeout(()=>badge.remove(), 2000);
+}
+function renderFeedback(){
+  const el = document.getElementById('feedbackList');
+  const fb = STATE.feedback || [];
+  if(fb.length===0){
+    el.innerHTML='<p style="text-align:center;color:#888;padding:30px">Nog geen opmerkingen. Tijdens studeren klik je 🐛 bij een kaart om iets te melden.</p>';
+    return;
+  }
+  el.innerHTML = `<p style="font-size:13px;color:#666;margin-bottom:10px">${fb.length} opmerking${fb.length===1?'':'en'} opgeslagen</p>` +
+    fb.slice().reverse().map((f,i)=>{
+      const idx = fb.length-1-i;
+      return `<div style="background:#fef3c7;border-left:3px solid var(--orange);padding:10px 14px;border-radius:8px;margin-bottom:8px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <b style="direction:rtl;font-size:16px">${f.w}</b>
+          <span style="color:#888;font-size:11px">${f.date.slice(0,10)}</span>
+        </div>
+        <div style="color:#666;margin-bottom:4px"><b>${f.kind}:</b> ${f.note}</div>
+        <div style="color:#999;font-size:11px">EN: ${f.en||'-'} · Fonetiek: ${f.ph||'-'} · Vorm: ${f.form||'-'}</div>
+        <button onclick="deleteFeedback(${idx})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px;padding:2px 6px;margin-top:4px">✗ Wissen</button>
+      </div>`;
+    }).join('');
+}
+function deleteFeedback(idx){
+  STATE.feedback.splice(idx,1); save(); renderFeedback();
+}
+function exportFeedback(){
+  const fb = STATE.feedback || [];
+  if(fb.length===0){alert('Geen opmerkingen om te exporteren');return}
+  const lines = [`Flashcards Alef — opmerkingen export`, `Datum: ${new Date().toISOString().slice(0,10)}`, `Aantal: ${fb.length}`, ''];
+  fb.forEach((f,i)=>{
+    lines.push(`--- ${i+1}. ${f.w} (${f.kind}) ${f.date.slice(0,10)} ---`);
+    lines.push(`Huidige EN: ${f.en||'-'}`);
+    lines.push(`Huidige fonetiek: ${f.ph||'-'}`);
+    lines.push(`Vorm: ${f.form||'-'}`);
+    lines.push(`Deck: ${f.deck||'-'}`);
+    lines.push(`Opmerking: ${f.note}`);
+    lines.push('');
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `flashcards_opmerkingen_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function clearFeedback(){
+  if(!confirm(`ZEKER? Wist ${(STATE.feedback||[]).length} opmerkingen. Kan niet ongedaan.`)) return;
+  STATE.feedback=[]; save(); renderFeedback();
+}
+
 // ==== Tabs ====
-function showTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById('tab-'+name).classList.add('on');document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const map={'study':1,'decks':2,'setup':3,'extra':4,'add':5,'mastered':6,'backup':7};if(map[name])document.querySelectorAll('nav a')[map[name]].classList.add('active');if(name==='mastered')renderMastered();if(name==='setup')loadSettingsUI();if(name==='study'){updateDashboard();document.getElementById('cardArea').style.display='none'}if(name==='decks')renderDecks()}
+function showTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById('tab-'+name).classList.add('on');document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const map={'study':1,'decks':2,'setup':3,'extra':4,'add':5,'mastered':6,'backup':7,'feedback':8};if(map[name])document.querySelectorAll('nav a')[map[name]].classList.add('active');if(name==='mastered')renderMastered();if(name==='setup')loadSettingsUI();if(name==='study'){updateDashboard();document.getElementById('cardArea').style.display='none'}if(name==='decks')renderDecks();if(name==='feedback')renderFeedback();}
 
 // ==== Init ====
 loadSettingsUI();updateDashboard();showTab('study');
