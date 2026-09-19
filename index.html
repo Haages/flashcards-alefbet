@@ -81,6 +81,7 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
 <body>
 <header>
   <div class="lang-toggle"><button id="btn-nl" class="active" onclick="setLang('nl')">NL</button><button id="btn-en" onclick="setLang('en')">EN</button></div>
+  <div style="position:absolute;top:12px;left:12px;background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.4);border-radius:20px;padding:4px 8px;font-size:12px;color:#fff;cursor:pointer" id="profileBtn" onclick="showProfileMenu()">👤 <span id="profileName">Jessica</span> ▾</div>
   <h1 data-i18n="title">Flashcards Alef</h1>
   <div class="sub" data-i18n="sub">Slim leren met spaced repetition — 100% offline</div>
 </header>
@@ -120,7 +121,8 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
   <div class="card-area" id="cardArea" style="display:none">
     <div class="progress"><div class="fill" id="progFill" style="width:0%"></div></div>
     <div class="progress-txt"><span id="progTxt">0/0</span><span id="progDir"></span></div>
-    <div class="card" id="card">
+    <div class="card" id="card" style="position:relative">
+      <button id="favBtn" onclick="toggleFavorite()" title="Markeer als favoriet" style="position:absolute;top:8px;left:8px;background:none;border:none;font-size:28px;cursor:pointer;padding:4px;line-height:1">☆</button>
       <div class="he" id="cardHe" onclick="flipCard()"></div>
       <div class="ph" id="cardPh" style="display:none"></div>
       <div class="en" id="cardEn" style="display:none"></div>
@@ -271,9 +273,16 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
   <div class="dash">
     <h2 data-i18n="backup-h">💾 Backup</h2>
     <p style="font-size:13px;color:#666;margin-bottom:14px" data-i18n="backup-p">Progressie + beheerst + eigen kaarten. Bewaar veilig ergens.</p>
-    <button class="big-btn" onclick="exportBackup()" data-i18n="btn-export">📤 Exporteer alles</button>
+    <h3 style="margin-top:0;color:var(--teal)">💾 Save-bestand op harde schijf (automatisch)</h3>
+    <div id="saveFileStatus"></div>
+    <hr style="margin:20px 0;border:none;border-top:1px solid #eee">
+    <h3 style="color:var(--teal)">📤 Handmatige backup</h3>
+    <button class="big-btn" onclick="exportBackup()" data-i18n="btn-export">📤 Exporteer .json (Downloads)</button>
     <p style="margin-top:20px" data-i18n="import-back">Backup terugzetten:</p>
     <input type="file" id="restoreFile" accept=".json" onchange="restoreBackup(event)">
+    <h3 style="margin-top:24px;color:var(--teal)">🗃 Automatische snapshots (in browser)</h3>
+    <p style="font-size:13px;color:#666;margin-bottom:10px">Automatisch elke dag opgeslagen in je browser. 7 dagen historie. Als je per ongeluk data verliest, hier terugzetten.</p>
+    <div id="snapshotList"></div>
     <h3 style="margin-top:24px;color:var(--red)">⚠ Alles resetten</h3>
     <p style="font-size:13px;color:#666;margin-bottom:10px">Wist alle progressie, streak, beheerst-lijst en instellingen. Gebruik als de app rare tellingen toont (bv. 0 bij alle decks).</p>
     <button class="big-btn" style="background:var(--red)" onclick="if(confirm('ZEKER? Dit wist alle progressie en instellingen. Kan niet ongedaan.')){localStorage.clear();location.reload()}">🗑 Reset alles (wist localStorage)</button>
@@ -539,11 +548,177 @@ function setLang(l){const d=I18N[l];document.querySelectorAll('[data-i18n]').for
 (function(){let s='nl';try{s=localStorage.getItem('fca_lang')||'nl'}catch(e){}setLang(s)})();
 
 // ==== State ====
-const STORE='fca_v2';
-const DEFAULT={progress:{},mastered:{},custom:[],mixes:[],hidden:{},themeExtras:{},history:{},feedback:[],settings:{dir:'he-en',newPerDay:10,tense:'all',weeks:999,nikud:true,phon:true,sent:true,audio:false,verbForms:true,curDeck:null}};
+// Profielen (multi-user)
+function getProfile(){ try{return localStorage.getItem('fca_profile')||'Jessica'}catch(e){return 'Jessica'} }
+function setProfile(name){ try{localStorage.setItem('fca_profile',name)}catch(e){} }
+function getProfiles(){ try{return JSON.parse(localStorage.getItem('fca_profiles')||'["Jessica"]')}catch(e){return ['Jessica']} }
+function saveProfiles(list){ try{localStorage.setItem('fca_profiles',JSON.stringify(list))}catch(e){} }
+const STORE = 'fca_v2_' + getProfile();
+const DEFAULT={progress:{},mastered:{},favorites:{},custom:[],mixes:[],hidden:{},themeExtras:{},history:{},feedback:[],settings:{dir:'he-en',newPerDay:10,tense:'all',weeks:999,nikud:true,phon:true,sent:true,audio:false,verbForms:true,curDeck:null}};
 let STATE=load();let SESSION={queue:[],idx:0,mode:'study',lastCard:null,lastRating:null,done:0};
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));return {...DEFAULT,...s,settings:{...DEFAULT.settings,...(s?.settings||{})}}}catch(e){return {...DEFAULT}}}
-function save(){localStorage.setItem(STORE,JSON.stringify(STATE))}
+// ==== IndexedDB helpers voor file-handle persistence ====
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const r = indexedDB.open('fca_handles',1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore('handles');
+    r.onsuccess = e => res(e.target.result);
+    r.onerror = e => rej(e);
+  });
+}
+async function idbGet(k){try{const db=await idbOpen();return await new Promise((res,rej)=>{const t=db.transaction('handles','readonly').objectStore('handles').get(k);t.onsuccess=e=>res(e.target.result);t.onerror=rej;})}catch(e){return null}}
+async function idbSet(k,v){try{const db=await idbOpen();return await new Promise((res,rej)=>{const t=db.transaction('handles','readwrite').objectStore('handles').put(v,k);t.onsuccess=res;t.onerror=rej;})}catch(e){}}
+async function idbDel(k){try{const db=await idbOpen();return await new Promise((res,rej)=>{const t=db.transaction('handles','readwrite').objectStore('handles').delete(k);t.onsuccess=res;t.onerror=rej;})}catch(e){}}
+
+// File System Access API
+let SAVE_HANDLE = null;
+let SAVE_HANDLE_STATUS = 'none'; // 'none' | 'ready' | 'needs-permission'
+async function initSaveFile(){
+  if(!('showSaveFilePicker' in window)) return;
+  const handle = await idbGet('handle_'+getProfile());
+  if(!handle) return;
+  const perm = await handle.queryPermission({mode:'readwrite'});
+  if(perm === 'granted'){SAVE_HANDLE = handle; SAVE_HANDLE_STATUS='ready';}
+  else {SAVE_HANDLE = handle; SAVE_HANDLE_STATUS='needs-permission';}
+  updateSaveFileUI();
+}
+async function chooseSaveFile(){
+  if(!('showSaveFilePicker' in window)){
+    alert('Deze browser ondersteunt File System Access niet. Gebruik Chrome of Edge desktop, of gebruik handmatig export.');
+    return;
+  }
+  try{
+    const handle = await window.showSaveFilePicker({
+      suggestedName: `flashcards_${getProfile()}_save.json`,
+      types: [{description: 'JSON save-bestand', accept: {'application/json': ['.json']}}]
+    });
+    SAVE_HANDLE = handle;
+    SAVE_HANDLE_STATUS='ready';
+    await idbSet('handle_'+getProfile(), handle);
+    await writeSaveFile();
+    alert(`✓ Save-bestand ingesteld! Vanaf nu wordt jouw progressie automatisch opgeslagen na elke kaart.`);
+    updateSaveFileUI();
+  }catch(e){
+    if(e.name !== 'AbortError') alert('Fout bij kiezen bestand: '+e.message);
+  }
+}
+async function chooseOpenSaveFile(){
+  if(!('showOpenFilePicker' in window)){alert('Niet ondersteund in deze browser');return}
+  try{
+    const [handle] = await window.showOpenFilePicker({
+      types: [{description: 'JSON save-bestand', accept: {'application/json': ['.json']}}]
+    });
+    const file = await handle.getFile();
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if(!data.progress){throw new Error('Geen geldig save-bestand')}
+    if(!confirm(`Save-bestand geladen: ${Object.keys(data.progress).length} kaarten. OVERSCHRIJF huidige data?`)) return;
+    SAVE_HANDLE = handle;
+    SAVE_HANDLE_STATUS='ready';
+    await idbSet('handle_'+getProfile(), handle);
+    STATE = {...DEFAULT, ...data, settings:{...DEFAULT.settings, ...(data.settings||{})}};
+    localStorage.setItem(STORE, JSON.stringify(STATE));
+    alert('✓ Save-bestand geladen. App laadt opnieuw...');
+    location.reload();
+  }catch(e){if(e.name!=='AbortError')alert('Fout: '+e.message)}
+}
+async function writeSaveFile(){
+  if(!SAVE_HANDLE || SAVE_HANDLE_STATUS !== 'ready') return;
+  try{
+    const w = await SAVE_HANDLE.createWritable();
+    await w.write(JSON.stringify(STATE,null,2));
+    await w.close();
+  }catch(e){
+    console.log('write file error:', e.message);
+    if(e.name==='NotAllowedError'){
+      SAVE_HANDLE_STATUS='needs-permission';
+      updateSaveFileUI();
+    }
+  }
+}
+async function requestSaveFilePermission(){
+  if(!SAVE_HANDLE) return;
+  const perm = await SAVE_HANDLE.requestPermission({mode:'readwrite'});
+  if(perm==='granted'){
+    SAVE_HANDLE_STATUS='ready';
+    await writeSaveFile();
+    updateSaveFileUI();
+    alert('✓ Toestemming verleend. Save-bestand actief.');
+  }
+}
+async function unlinkSaveFile(){
+  if(!confirm('Save-bestand loskoppelen? Progressie blijft in browser opgeslagen.')) return;
+  SAVE_HANDLE = null; SAVE_HANDLE_STATUS='none';
+  await idbDel('handle_'+getProfile());
+  updateSaveFileUI();
+}
+function updateSaveFileUI(){
+  const el = document.getElementById('saveFileStatus');
+  if(!el) return;
+  if(!('showSaveFilePicker' in window)){
+    el.innerHTML = '<p style="font-size:13px;color:#666">📱 Deze browser ondersteunt geen save-bestand op de harde schijf. Gebruik Chrome of Edge desktop voor deze functie. Op mobiel wordt automatisch localStorage + snapshots gebruikt.</p>';
+    return;
+  }
+  if(SAVE_HANDLE_STATUS==='ready'){
+    el.innerHTML = `<div style="background:#dcfce7;padding:12px;border-radius:8px;font-size:13px;color:#166534"><b>✅ Save-bestand actief</b><br>Naam: <code>${SAVE_HANDLE.name}</code><br>Elke kaart wordt automatisch opgeslagen.</div><button class="small-btn" style="margin-top:8px" onclick="unlinkSaveFile()">Loskoppelen</button>`;
+  } else if(SAVE_HANDLE_STATUS==='needs-permission'){
+    el.innerHTML = `<div style="background:#fee2e2;padding:12px;border-radius:8px;font-size:13px;color:#991b1b"><b>⚠ Toestemming vereist</b><br>Save-bestand: <code>${SAVE_HANDLE.name}</code><br><button class="big-btn" style="background:#991b1b;margin-top:8px" onclick="requestSaveFilePermission()">Toestemming geven</button></div>`;
+  } else {
+    el.innerHTML = `<p style="font-size:13px;color:#666;margin-bottom:8px">💾 Nog geen save-bestand ingesteld. Alle data blijft in browser (kan verdwijnen bij browser-wipe).</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="big-btn" style="background:var(--teal)" onclick="chooseSaveFile()">🗂 Nieuw save-bestand aanmaken</button>
+      <button class="big-btn" onclick="chooseOpenSaveFile()">📂 Bestaand save-bestand laden</button>
+    </div>`;
+  }
+}
+
+function save(){
+  const s = JSON.stringify(STATE);
+  localStorage.setItem(STORE, s);
+  // Auto-write naar save-bestand (async, geen await)
+  writeSaveFile().catch(()=>{});
+  // Auto-snapshot per dag (rolling 7 dagen)
+  try{
+    const snapKey = 'fca_snap_'+getProfile()+'_'+today();
+    localStorage.setItem(snapKey, s);
+    // Ruim oude snapshots (>7 dagen)
+    const keep = [];
+    for(let i=0; i<7; i++){
+      const d = new Date(); d.setDate(d.getDate()-i);
+      keep.push('fca_snap_'+getProfile()+'_'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    }
+    for(let i=0; i<localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith('fca_snap_'+getProfile()+'_') && !keep.includes(k)){
+        localStorage.removeItem(k);
+      }
+    }
+  }catch(e){console.log('snapshot fail:', e)}
+}
+function listSnapshots(){
+  const snaps = [];
+  const prefix = 'fca_snap_'+getProfile()+'_';
+  for(let i=0; i<localStorage.length; i++){
+    const k = localStorage.key(i);
+    if(k && k.startsWith(prefix)){
+      const date = k.substring(prefix.length);
+      try{
+        const data = JSON.parse(localStorage.getItem(k));
+        const progressCount = Object.keys(data.progress||{}).length;
+        snaps.push({date, key:k, progress:progressCount, size:localStorage.getItem(k).length});
+      }catch(e){}
+    }
+  }
+  return snaps.sort((a,b)=>b.date.localeCompare(a.date));
+}
+function restoreSnapshot(key){
+  if(!confirm(`ZEKER? Overschrijf huidige data met snapshot van ${key.split('_').pop()}?`)) return;
+  const data = localStorage.getItem(key);
+  if(!data){alert('Snapshot niet gevonden');return}
+  localStorage.setItem(STORE, data);
+  alert('✓ Hersteld. App laadt opnieuw...');
+  location.reload();
+}
 function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x.toISOString().slice(0,10)}
 
@@ -561,8 +736,10 @@ function getAllDecks(){
   const verbInf = [{id:'verb:inf',name:'📗 Werkwoorden — alleen infinitief (met alle 3 tijden)',type:'verb',source:'inf'}];
   const themes = Object.entries(window.VOCAB_THEMES?.themes||{}).map(([k,t])=>({id:'theme:'+k,name:t.label,type:'theme',source:k}));
   const custom = STATE.custom.length ? [{id:'main:custom',name:'⭐ Mijn eigen kaarten',type:'custom',source:'custom'}] : [];
+  const favCount = Object.keys(STATE.favorites||{}).length;
+  const favs = favCount > 0 ? [{id:'special:favs',name:'★ Mijn favorieten',type:'favorites',source:'favs'}] : [];
   const mixes = (STATE.mixes||[]).map(m=>({id:'mix:'+m.name,name:'🎨 '+m.name,type:'mix',source:m.decks,filter:m}));
-  return {main:[...main,...custom],verb:verbInf,theme:themes,mix:mixes};
+  return {main:[...favs,...main,...custom],verb:verbInf,theme:themes,mix:mixes};
 }
 
 function getDeckItems(deck){
@@ -575,6 +752,22 @@ function getDeckItems(deck){
 function getRawDeckItems(deck){
   const t=deck.type;
   let items = [];
+  if(t==='favorites'){
+    // Verzamel alle originele items uit alle decks die favoriet zijn
+    const favKeys = STATE.favorites || {};
+    const all = getAllDecks();
+    const collected = new Map();
+    for(const grp of [all.main, all.verb, all.theme, all.mix]){
+      for(const d of grp){
+        if(d.type === 'favorites') continue;
+        for(const it of getRawDeckItems(d)){
+          const k = (it.wn||it.he||it.w||it.inf||'').replace(/[֑-ׇ]/g,'');
+          if(favKeys[k] && !collected.has(k)) collected.set(k, it);
+        }
+      }
+    }
+    return Array.from(collected.values());
+  }
   if(t==='main'){
     if(deck.source==='custom') items = STATE.custom;
     else {
@@ -699,7 +892,9 @@ function updateDashboard(){
   }
   const newDoneToday = countTodayNew();
   const remaining = Math.max(0, STATE.settings.newPerDay - newDoneToday);
-  sb.innerHTML = `🔥 <b>${streak}</b> dag${streak===1?'':'en'} streak · Vandaag geoefend: <b>${th.done}</b> (${newDoneToday}/${STATE.settings.newPerDay} nieuw · ${remaining} te gaan)`;
+  const dsb = daysSinceBackup();
+  const warn = dsb >= 7 ? `<div style="background:#fee2e2;color:#991b1b;padding:6px 10px;border-radius:8px;margin-top:6px;font-size:12px">⚠ ${dsb === 999 ? 'Nog nooit gebackupt' : dsb+' dagen geen backup'} — <a onclick="exportBackup()" style="color:#991b1b;text-decoration:underline;cursor:pointer;font-weight:600">nu backuppen</a></div>` : '';
+  sb.innerHTML = `🔥 <b>${streak}</b> dag${streak===1?'':'en'} streak · Vandaag: <b>${th.done}</b> (${newDoneToday}/${STATE.settings.newPerDay} nieuw · ${remaining} te gaan)${warn}`;
   if(!deck){document.getElementById('sNew').textContent='-';document.getElementById('sReview').textContent='-';document.getElementById('sDone').textContent='-';document.getElementById('sMastered').textContent=Object.keys(STATE.mastered).length;return}
   const {queue,newCount,reviewCount} = pickQueue();
   document.getElementById('sNew').textContent=newCount;
@@ -924,7 +1119,7 @@ function showCard(){
     if(trans){
       sentEl.innerHTML = `<div style="color:#8a6d3b">${sent}</div><div style="color:var(--teal);margin-top:6px;direction:ltr;text-align:left;font-style:italic">↳ ${trans}</div>`;
     } else {
-      sentEl.innerHTML = `<div style="color:#8a6d3b">${sent}</div><div style="color:#aaa;font-size:12px;margin-top:4px;direction:ltr;text-align:left">(vertaling niet gevonden — deel van de zin: <a href="https://translate.google.com/?sl=iw&tl=en&text=${encodeURIComponent(clean)}" target="_blank" style="color:var(--teal)">Google Vertaal ↗</a>)</div>`;
+      sentEl.innerHTML = `<div style="color:#8a6d3b">${sent}</div><div style="color:#aaa;font-size:12px;margin-top:4px;direction:ltr;text-align:left">(vertaling niet beschikbaar — deze zin staat nog niet in ons lesmateriaal)</div>`;
     }
   } : null;
   document.getElementById('cardHint').textContent = hint;
@@ -953,6 +1148,7 @@ function showCard(){
   document.getElementById('progTxt').textContent = `${SESSION.idx+1} / ${SESSION.queue.length}`;
   document.getElementById('progDir').textContent = dir==='he-en'?'HE → EN':'EN → HE';
   if(s.audio) playAudio();
+  updateFavButton();
 }
 function renderForms(obj,labels){
   return Object.entries(obj).map(([k,v])=>`<div class="row"><span>${v}</span><span class="pron">${labels[k]||k}</span></div>`).join('');
@@ -1163,9 +1359,10 @@ function showDone(){
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:16px">
-        <button class="big-btn" style="background:var(--green)" onclick="startRepeat()">🔄 Deze deck nog eens oefenen</button>
-        <button class="big-btn" style="background:var(--teal)" onclick="showTab('extra')">💪 Extra opties</button>
-        <button class="big-btn" onclick="showTab('decks')">📚 Ander deck kiezen</button>
+        <button class="big-btn" style="background:var(--orange-d)" onclick="exportBackup()">💾 Nu backuppen (aanrader!)</button>
+        <button class="big-btn" style="background:var(--green)" onclick="startRepeat()">🔄 Deze deck nog eens</button>
+        <button class="big-btn" style="background:var(--teal)" onclick="showTab('extra')">💪 Extra</button>
+        <button class="big-btn" onclick="showTab('decks')">📚 Ander deck</button>
       </div>
       ${streak >= 3 ? `<p style="margin-top:20px;color:var(--orange-d);font-weight:600">🔥 ${streak} dagen op rij! Blijf zo doorgaan 💪</p>` : ''}
     </div>`;
@@ -1257,8 +1454,78 @@ function importDeck(evt){
 // ==== Mastered / backup ====
 function renderMastered(){const el=document.getElementById('masteredList');const ks=Object.keys(STATE.mastered);if(ks.length===0){el.innerHTML='<p style="text-align:center;color:#888;padding:20px">Nog geen beheerste kaarten.</p>';return}el.innerHTML=ks.map(k=>{const m=STATE.mastered[k];return `<div class="list-item"><div class="word">${m.he}</div><div class="en2">${m.en}</div><button onclick="unmaster('${k.replace(/'/g,"\\'")}')">Terug</button></div>`}).join('')}
 function unmaster(k){delete STATE.mastered[k];save();renderMastered();updateDashboard()}
-function exportBackup(){const b=new Blob([JSON.stringify(STATE,null,2)],{type:'application/json'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=`flashcards_alef_backup_${today()}.json`;a.click();URL.revokeObjectURL(u)}
+function exportBackup(){
+  const b=new Blob([JSON.stringify(STATE,null,2)],{type:'application/json'});
+  const u=URL.createObjectURL(b);
+  const a=document.createElement('a');
+  a.href=u;
+  a.download=`flashcards_backup_${getProfile()}_${today()}.json`;
+  a.click();
+  URL.revokeObjectURL(u);
+  try{localStorage.setItem('fca_lastBackup_'+getProfile(), today())}catch(e){}
+  alert('✓ Backup opgeslagen in Downloads. Bewaar 'm ergens veilig (mail naar jezelf, USB, cloud).');
+}
+function daysSinceBackup(){
+  try{
+    const last = localStorage.getItem('fca_lastBackup_'+getProfile());
+    if(!last) return 999;
+    const d1 = new Date(today()), d2 = new Date(last);
+    return Math.floor((d1-d2)/(1000*60*60*24));
+  }catch(e){return 999}
+}
 function restoreBackup(evt){const f=evt.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const s=JSON.parse(e.target.result);if(!s.progress)throw new Error('Ongeldig');if(!confirm('OVERSCHRIJVEN?'))return;STATE={...DEFAULT,...s,settings:{...DEFAULT.settings,...(s.settings||{})}};save();alert('Terug');location.reload()}catch(err){alert('Fout: '+err.message)}};r.readAsText(f)}
+
+// ==== Favorieten ====
+function favKey(it){return (it.wn||it.he||it.w||it.inf||'').replace(/[֑-ׇ]/g,'')}
+function isFavorite(it){return !!STATE.favorites[favKey(it)]}
+function toggleFavorite(){
+  const it = SESSION.queue[SESSION.idx]; if(!it) return;
+  const k = favKey(it); if(!k) return;
+  if(STATE.favorites[k]) delete STATE.favorites[k];
+  else STATE.favorites[k] = {he: it.wn||it.he||it.w||it.inf, en: it.en, at: today()};
+  save();
+  updateFavButton();
+}
+function updateFavButton(){
+  const btn = document.getElementById('favBtn');
+  if(!btn) return;
+  const it = SESSION.queue[SESSION.idx];
+  if(!it){btn.textContent='☆'; btn.style.color='#aaa'; return}
+  if(isFavorite(it)){btn.textContent='★'; btn.style.color='#f59e0b'}
+  else {btn.textContent='☆'; btn.style.color='#aaa'}
+}
+
+// ==== Multi-user profielen ====
+function showProfileMenu(){
+  const profiles = getProfiles();
+  const current = getProfile();
+  const list = profiles.map(p => `  ${p===current?'▶':' '} ${p}`).join('\n');
+  const choice = prompt(`Kies profiel of typ nieuwe naam:\n\n${list}\n\nTyp een naam om te wisselen of nieuw profiel aan te maken:\n(Typ "verwijder <naam>" om een profiel te wissen)`, current);
+  if(!choice || choice.trim() === current) return;
+  const name = choice.trim();
+  // Verwijder profiel
+  if(name.toLowerCase().startsWith('verwijder ')){
+    const toDel = name.substring(10).trim();
+    if(toDel === current){alert('Kan huidig profiel niet verwijderen. Wissel eerst.'); return}
+    if(!profiles.includes(toDel)){alert('Profiel niet gevonden: '+toDel); return}
+    if(!confirm(`ZEKER? Wist alle data van "${toDel}"?`)) return;
+    localStorage.removeItem('fca_v2_'+toDel);
+    saveProfiles(profiles.filter(p=>p!==toDel));
+    alert(`Profiel "${toDel}" verwijderd.`);
+    return;
+  }
+  // Wisselen (of nieuwe aanmaken)
+  if(!profiles.includes(name)){
+    saveProfiles([...profiles, name]);
+    alert(`Nieuw profiel "${name}" aangemaakt. Fris begin met eigen progressie.`);
+  }
+  setProfile(name);
+  alert(`Gewisseld naar profiel: ${name}. App laadt opnieuw...`);
+  location.reload();
+}
+function updateProfileUI(){
+  document.getElementById('profileName').textContent = getProfile();
+}
 
 // ==== Feedback ====
 function reportCard(){
@@ -1337,11 +1604,22 @@ function clearFeedback(){
 }
 
 // ==== Tabs ====
-function showTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById('tab-'+name).classList.add('on');document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const map={'study':1,'decks':2,'setup':3,'extra':4,'add':5,'mastered':6,'backup':7,'feedback':8};if(map[name])document.querySelectorAll('nav a')[map[name]].classList.add('active');if(name==='mastered')renderMastered();if(name==='setup')loadSettingsUI();if(name==='study'){updateDashboard();document.getElementById('cardArea').style.display='none'}if(name==='decks')renderDecks();if(name==='feedback')renderFeedback();}
+function showTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.getElementById('tab-'+name).classList.add('on');document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const map={'study':1,'decks':2,'setup':3,'extra':4,'add':5,'mastered':6,'backup':7,'feedback':8};if(map[name])document.querySelectorAll('nav a')[map[name]].classList.add('active');if(name==='mastered')renderMastered();if(name==='setup')loadSettingsUI();if(name==='study'){updateDashboard();document.getElementById('cardArea').style.display='none'}if(name==='decks')renderDecks();if(name==='feedback')renderFeedback();if(name==='backup'){renderSnapshots();updateSaveFileUI();}}
+function renderSnapshots(){
+  const el = document.getElementById('snapshotList');
+  const snaps = listSnapshots();
+  if(snaps.length===0){el.innerHTML='<p style="color:#888;font-size:13px">Nog geen snapshots (worden gemaakt zodra je een kaart beoordeelt).</p>';return}
+  el.innerHTML = snaps.map(s => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--cream);border-radius:8px;margin-bottom:6px">
+    <div><b>${s.date}</b> <span style="color:#888;font-size:12px">· ${s.progress} kaarten · ${(s.size/1024).toFixed(1)} KB</span></div>
+    <button onclick="restoreSnapshot('${s.key}')" class="small-btn">↺ Terugzetten</button>
+  </div>`).join('');
+}
 
 // ==== Init ====
+updateProfileUI();
 loadSettingsUI();updateDashboard();showTab('study');
 if(!STATE.settings.curDeck){setTimeout(()=>showTab('decks'),100)}
+initSaveFile();
 </script>
 </body>
 </html>
