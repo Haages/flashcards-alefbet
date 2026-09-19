@@ -1499,29 +1499,73 @@ function updateFavButton(){
 function showProfileMenu(){
   const profiles = getProfiles();
   const current = getProfile();
-  const list = profiles.map(p => `  ${p===current?'▶':' '} ${p}`).join('\n');
-  const choice = prompt(`Kies profiel of typ nieuwe naam:\n\n${list}\n\nTyp een naam om te wisselen of nieuw profiel aan te maken:\n(Typ "verwijder <naam>" om een profiel te wissen)`, current);
-  if(!choice || choice.trim() === current) return;
-  const name = choice.trim();
-  // Verwijder profiel
-  if(name.toLowerCase().startsWith('verwijder ')){
-    const toDel = name.substring(10).trim();
-    if(toDel === current){alert('Kan huidig profiel niet verwijderen. Wissel eerst.'); return}
-    if(!profiles.includes(toDel)){alert('Profiel niet gevonden: '+toDel); return}
-    if(!confirm(`ZEKER? Wist alle data van "${toDel}"?`)) return;
-    localStorage.removeItem('fca_v2_'+toDel);
-    saveProfiles(profiles.filter(p=>p!==toDel));
-    alert(`Profiel "${toDel}" verwijderd.`);
-    return;
-  }
-  // Wisselen (of nieuwe aanmaken)
-  if(!profiles.includes(name)){
-    saveProfiles([...profiles, name]);
-    alert(`Nieuw profiel "${name}" aangemaakt. Fris begin met eigen progressie.`);
-  }
+  // Bouw modal
+  const overlay = document.createElement('div');
+  overlay.id = 'profileModal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = e => { if(e.target === overlay) overlay.remove(); };
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)';
+  box.innerHTML = `
+    <h2 style="color:var(--teal);margin-bottom:12px">👤 Profielen</h2>
+    <p style="font-size:13px;color:#666;margin-bottom:12px">Elk profiel heeft eigen progressie, streak en instellingen.</p>
+    <h3 style="font-size:13px;color:var(--teal);margin:14px 0 8px;text-transform:uppercase">Bestaande profielen</h3>
+    <div id="profListBox"></div>
+    <h3 style="font-size:13px;color:var(--teal);margin:14px 0 8px;text-transform:uppercase">Nieuw profiel aanmaken</h3>
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <input type="text" id="newProfName" placeholder="Naam (bv. Chana, Man)" style="flex:1;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px">
+      <button class="small-btn" onclick="doCreateProfile()">+ Maken</button>
+    </div>
+    <button class="small-btn" style="background:#888;width:100%;padding:10px" onclick="document.getElementById('profileModal').remove()">Sluiten</button>
+  `;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  renderProfList();
+}
+function renderProfList(){
+  const el = document.getElementById('profListBox');
+  if(!el) return;
+  const profiles = getProfiles();
+  const current = getProfile();
+  el.innerHTML = profiles.map(p => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:${p===current?'#dcfce7':'var(--cream)'};border-radius:8px;margin-bottom:6px;font-size:14px">
+      <span><b>${p===current?'▶ ':''}${p}</b>${p===current?' <span style="color:#166534;font-size:11px">(huidig)</span>':''}</span>
+      <div style="display:flex;gap:4px">
+        ${p !== current ? `<button class="small-btn" style="padding:4px 10px;font-size:12px" onclick="doSwitchProfile('${p.replace(/'/g,"\\'")}')">Wisselen</button>` : ''}
+        ${p !== current ? `<button class="small-btn" style="padding:4px 10px;font-size:12px;background:var(--red)" onclick="doDeleteProfile('${p.replace(/'/g,"\\'")}')">Wissen</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+function doSwitchProfile(name){
   setProfile(name);
-  alert(`Gewisseld naar profiel: ${name}. App laadt opnieuw...`);
+  alert(`Gewisseld naar "${name}". App laadt opnieuw...`);
   location.reload();
+}
+function doCreateProfile(){
+  const inp = document.getElementById('newProfName');
+  const name = (inp.value||'').trim();
+  if(!name){inp.focus(); return}
+  const profiles = getProfiles();
+  if(profiles.includes(name)){alert('Profiel bestaat al'); return}
+  saveProfiles([...profiles, name]);
+  setProfile(name);
+  alert(`Nieuw profiel "${name}" aangemaakt. App laadt opnieuw...`);
+  location.reload();
+}
+function doDeleteProfile(name){
+  if(!confirm(`ZEKER? Wist alle progressie en data van profiel "${name}"?`)) return;
+  const profiles = getProfiles();
+  localStorage.removeItem('fca_v2_'+name);
+  // Ook snapshots wissen
+  const toRemove = [];
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k && k.startsWith('fca_snap_'+name+'_')) toRemove.push(k);
+  }
+  toRemove.forEach(k => localStorage.removeItem(k));
+  saveProfiles(profiles.filter(p=>p!==name));
+  renderProfList();
 }
 function updateProfileUI(){
   document.getElementById('profileName').textContent = getProfile();
