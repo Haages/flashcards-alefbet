@@ -81,13 +81,12 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
 <body>
 <header>
   <div class="lang-toggle"><button id="btn-nl" class="active" onclick="setLang('nl')">NL</button><button id="btn-en" onclick="setLang('en')">EN</button></div>
-  <div style="position:absolute;top:12px;left:12px;background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.4);border-radius:20px;padding:4px 8px;font-size:12px;color:#fff;cursor:pointer" id="profileBtn" onclick="showProfileMenu()">👤 <span id="profileName">Jessica</span> ▾</div>
   <h1 data-i18n="title">Flashcards Alef</h1>
   <div class="sub" data-i18n="sub">Slim leren met spaced repetition — 100% offline</div>
 </header>
 <div style="background:#dcfce7;color:#166534;padding:6px 14px;font-size:12px;text-align:center">🔊 Audio via Web Speech · 🐛 Meld fouten via de knop op elke kaart</div>
 <nav>
-  <a href="index.html" data-i18n="nav-home">🏠 Dashboard</a>
+  <a style="background:var(--orange);color:#fff;border-color:var(--orange)" onclick="showProfileMenu()"><span style="font-size:14px">👤</span> <span id="profileName">Jessica</span> ▾</a>
   <a class="active" onclick="showTab('study')" data-i18n="nav-study">🎓 Vandaag</a>
   <a onclick="showTab('decks')" data-i18n="nav-decks">📚 Decks</a>
   <a onclick="showTab('setup')" data-i18n="nav-setup">⚙️ Instellingen</a>
