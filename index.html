@@ -1496,30 +1496,33 @@ function updateFavButton(){
 
 // ==== Multi-user profielen ====
 function showProfileMenu(){
-  const profiles = getProfiles();
-  const current = getProfile();
-  // Bouw modal
-  const overlay = document.createElement('div');
-  overlay.id = 'profileModal';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  overlay.onclick = e => { if(e.target === overlay) overlay.remove(); };
-  const box = document.createElement('div');
-  box.style.cssText = 'background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)';
-  box.innerHTML = `
-    <h2 style="color:var(--teal);margin-bottom:12px">👤 Profielen</h2>
-    <p style="font-size:13px;color:#666;margin-bottom:12px">Elk profiel heeft eigen progressie, streak en instellingen.</p>
-    <h3 style="font-size:13px;color:var(--teal);margin:14px 0 8px;text-transform:uppercase">Bestaande profielen</h3>
-    <div id="profListBox"></div>
-    <h3 style="font-size:13px;color:var(--teal);margin:14px 0 8px;text-transform:uppercase">Nieuw profiel aanmaken</h3>
-    <div style="display:flex;gap:6px;margin-bottom:14px">
-      <input type="text" id="newProfName" placeholder="Naam (bv. Chana, Man)" style="flex:1;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px">
-      <button class="small-btn" onclick="doCreateProfile()">+ Maken</button>
-    </div>
-    <button class="small-btn" style="background:#888;width:100%;padding:10px" onclick="document.getElementById('profileModal').remove()">Sluiten</button>
-  `;
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-  renderProfList();
+  // Als er al een modal is: sluit die
+  const existing = document.getElementById('profileModal');
+  if(existing){existing.remove(); return;}
+  try {
+    const profiles = getProfiles();
+    const current = getProfile();
+    // Bouw modal — inline, geen dependencies
+    const html = `
+      <div id="profileModal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target.id==='profileModal')this.remove()">
+        <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.5)" onclick="event.stopPropagation()">
+          <h2 style="color:#0e7490;margin-bottom:12px;font-size:20px">👤 Profielen</h2>
+          <p style="font-size:13px;color:#666;margin-bottom:12px">Elk profiel heeft eigen progressie, streak en instellingen.</p>
+          <h3 style="font-size:12px;color:#0e7490;margin:14px 0 8px;text-transform:uppercase;letter-spacing:1px">Bestaande profielen</h3>
+          <div id="profListBox"></div>
+          <h3 style="font-size:12px;color:#0e7490;margin:14px 0 8px;text-transform:uppercase;letter-spacing:1px">Nieuw profiel</h3>
+          <div style="display:flex;gap:6px;margin-bottom:14px">
+            <input type="text" id="newProfName" placeholder="Naam (bv. Chana, Man)" style="flex:1;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px">
+            <button style="padding:8px 14px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600" onclick="doCreateProfile()">+ Maken</button>
+          </div>
+          <button style="padding:10px;background:#888;color:#fff;border:none;border-radius:8px;width:100%;cursor:pointer;font-weight:600" onclick="document.getElementById('profileModal').remove()">Sluiten</button>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    renderProfList();
+  } catch(e){
+    alert('Fout bij openen profielen: '+e.message+'\n\nJe browser heeft mogelijk de nieuwste versie nog niet geladen. Sluit de tab volledig, wis cache, en heropen.');
+  }
 }
 function renderProfList(){
   const el = document.getElementById('profListBox');
