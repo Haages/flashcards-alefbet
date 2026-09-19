@@ -86,7 +86,7 @@ input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #dd
 </header>
 <div style="background:#dcfce7;color:#166534;padding:6px 14px;font-size:12px;text-align:center">🔊 Audio via Web Speech · 🐛 Meld fouten via de knop op elke kaart</div>
 <nav>
-  <a style="background:var(--orange);color:#fff;border-color:var(--orange)" onclick="showProfileMenu()"><span style="font-size:14px">👤</span> <span id="profileName">Jessica</span> ▾</a>
+  <button type="button" style="background:var(--orange);color:#fff;border:1px solid var(--orange);border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit" onclick="showProfileMenu()">👤 <span id="profileName">Jessica</span> ▾</button>
   <a class="active" onclick="showTab('study')" data-i18n="nav-study">🎓 Vandaag</a>
   <a onclick="showTab('decks')" data-i18n="nav-decks">📚 Decks</a>
   <a onclick="showTab('setup')" data-i18n="nav-setup">⚙️ Instellingen</a>
@@ -1462,7 +1462,7 @@ function exportBackup(){
   a.click();
   URL.revokeObjectURL(u);
   try{localStorage.setItem('fca_lastBackup_'+getProfile(), today())}catch(e){}
-  alert('✓ Backup opgeslagen in Downloads. Bewaar 'm ergens veilig (mail naar jezelf, USB, cloud).');
+  alert('✓ Backup opgeslagen in Downloads. Bewaar hem ergens veilig (mail, USB, cloud).');
 }
 function daysSinceBackup(){
   try{
@@ -1496,12 +1496,15 @@ function updateFavButton(){
 
 // ==== Multi-user profielen ====
 function showProfileMenu(){
+  // TEST-ALERT: kunnen we bewijzen dat de functie draait?
+  console.log('[showProfileMenu] aangeroepen');
   // Als er al een modal is: sluit die
   const existing = document.getElementById('profileModal');
   if(existing){existing.remove(); return;}
   try {
     const profiles = getProfiles();
     const current = getProfile();
+    console.log('[showProfileMenu] profielen:', profiles, 'huidig:', current);
     // Bouw modal — inline, geen dependencies
     const html = `
       <div id="profileModal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target.id==='profileModal')this.remove()">
