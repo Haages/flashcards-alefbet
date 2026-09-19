@@ -1528,14 +1528,50 @@ function renderProfList(){
   const profiles = getProfiles();
   const current = getProfile();
   el.innerHTML = profiles.map(p => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:${p===current?'#dcfce7':'var(--cream)'};border-radius:8px;margin-bottom:6px;font-size:14px">
-      <span><b>${p===current?'▶ ':''}${p}</b>${p===current?' <span style="color:#166534;font-size:11px">(huidig)</span>':''}</span>
-      <div style="display:flex;gap:4px">
-        ${p !== current ? `<button class="small-btn" style="padding:4px 10px;font-size:12px" onclick="doSwitchProfile('${p.replace(/'/g,"\\'")}')">Wisselen</button>` : ''}
-        ${p !== current ? `<button class="small-btn" style="padding:4px 10px;font-size:12px;background:var(--red)" onclick="doDeleteProfile('${p.replace(/'/g,"\\'")}')">Wissen</button>` : ''}
+    <div style="padding:10px 12px;background:${p===current?'#dcfce7':'var(--cream)'};border-radius:8px;margin-bottom:6px;font-size:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <b>${p===current?'▶ ':''}${p}</b>${p===current?' <span style="color:#166534;font-size:11px">(huidig)</span>':''}
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${p !== current ? `<button class="small-btn" style="padding:4px 10px;font-size:12px" onclick="doSwitchProfile('${p.replace(/'/g,"\\'")}')">🔄 Wisselen</button>` : ''}
+        <button class="small-btn" style="padding:4px 10px;font-size:12px;background:var(--orange)" onclick="doRenameProfile('${p.replace(/'/g,"\\'")}')">✏️ Hernoemen</button>
+        ${p !== current ? `<button class="small-btn" style="padding:4px 10px;font-size:12px;background:var(--red)" onclick="doDeleteProfile('${p.replace(/'/g,"\\'")}')">🗑 Wissen</button>` : ''}
       </div>
     </div>
   `).join('');
+}
+function doRenameProfile(oldName){
+  const newName = prompt(`Nieuwe naam voor "${oldName}":`, oldName);
+  if(!newName || newName.trim()===oldName) return;
+  const clean = newName.trim();
+  const profiles = getProfiles();
+  if(profiles.includes(clean)){alert('Naam is al in gebruik'); return}
+  // Kopieer localStorage: data
+  const data = localStorage.getItem('fca_v2_'+oldName);
+  if(data) localStorage.setItem('fca_v2_'+clean, data);
+  localStorage.removeItem('fca_v2_'+oldName);
+  // Kopieer snapshots
+  const toMove = [];
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k && k.startsWith('fca_snap_'+oldName+'_')) toMove.push(k);
+  }
+  toMove.forEach(k=>{
+    const suffix = k.substring(('fca_snap_'+oldName+'_').length);
+    const v = localStorage.getItem(k);
+    localStorage.setItem('fca_snap_'+clean+'_'+suffix, v);
+    localStorage.removeItem(k);
+  });
+  // Update profielen-lijst
+  saveProfiles(profiles.map(p=>p===oldName?clean:p));
+  // Als huidige profiel: update ook
+  if(getProfile()===oldName){
+    setProfile(clean);
+    alert(`Profiel hernoemd naar "${clean}". App laadt opnieuw...`);
+    location.reload();
+  } else {
+    renderProfList();
+  }
 }
 function doSwitchProfile(name){
   setProfile(name);
